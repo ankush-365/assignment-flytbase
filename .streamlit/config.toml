@@ -1,0 +1,4 @@
+[server]
+# The default file watcher hit the system inotify limit ("inotify watch limit reached").
+# Auto-reload on code changes is not needed for using the app: restart it after editing code.
+fileWatcherType = "none"

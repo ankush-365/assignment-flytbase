@@ -1,0 +1,97 @@
+# Drone Security Analyst Agent - configuration
+# All thresholds, rules and model choices live here so they can be tuned per video.
+
+source:
+  video: data/videos/drone_street.mp4     # oblique drone view of a street (4K, 23.5 s)
+  sample_fps: 5                # frames analysed per second of video (tracking needs >= ~5)
+  start_time: "2026-11-24T14:30:00"  # simulated wall-clock for frame 0 (clip is daylight)
+  max_seconds: null            # stop after N seconds of video (null = whole clip)
+
+telemetry:                     # simulated drone telemetry (docked drone patrolling a property)
+  home_lat: 18.520430
+  home_lon: 73.856744
+  altitude_m: 40.0
+  altitude_jitter_m: 1.5
+  patrol_radius_m: 60.0
+  patrol_period_s: 300.0       # one patrol loop every 5 min
+  battery_start_pct: 100.0
+  battery_drain_pct_per_min: 0.8
+
+detector:
+  model: models/yolo11s.pt
+  conf: 0.25                   # permissive: the VLM removes false positives
+  iou: 0.5
+  imgsz: 1920                  # 4K input: 1920 keeps small cars/pedestrians (~20 ms/frame on RTX 3080)
+  device: 0                    # GPU index or "cpu"
+  tracker: bytetrack.yaml
+  classes: null                # null = all 80 COCO classes ("any object detected by YOLO")
+  min_box_px: 20               # ignore boxes smaller than this (either side)
+
+categories:                    # how YOLO labels map to event categories (anything else = "object")
+  person: [person]
+  vehicle: [car, truck, bus, motorcycle, bicycle, boat, train, airplane]
+
+tracking:
+  min_hits_before_verify: 2    # track must be seen in N frames before it is sent to the VLM
+  lost_after_s: 3.0            # track considered gone after N seconds unseen
+
+vlm:                           # free + local: Ollama. qwen3-vl:2b = 3.1 GB VRAM, ~4-6 s/call on RTX 3080
+  enabled: true
+  model: qwen3-vl:2b-instruct  # (qwen2.5vl:3b spilled to CPU: ~47 s/call; qwen2.5vl:7b ~23 s/call on CPU)
+  host: http://localhost:11434
+  call_every_s: 1.0            # ONE VLM call per second of video that contains detections
+  max_objects_per_call: 12     # crops per call (contact sheet); the rest wait for a later second
+  verify_categories: [person, vehicle, object]
+  crop_padding: 0.25           # pad crops so the VLM sees context
+  min_crop_px: 160             # upscale small crops to this size
+  frame_max_side: 896          # full frame is downscaled to this for the scene description
+  num_ctx: 4096
+  max_tokens: 200              # output budget per call = max_tokens + tokens_per_object * crops ...
+  tokens_per_object: 85        # (~60 tokens per object entry, ~120 for the scene)
+  max_tokens_cap: 1600         # ... capped, so a runaway generation ends in seconds
+  max_attempts: 2              # drop a crop after this many calls returned no verdict for it
+  max_backlog_calls: 5         # extra calls after the video for objects that never got a slot
+  max_in_flight: 30            # offline file: queue every second's call; lower it for live streams
+  timeout_s: 180
+
+embeddings:
+  enabled: true
+  model: nomic-embed-text:v1.5
+
+rules:
+  min_track_s: 1.0             # an object must be seen this long before any alert (filters 1-2 frame blips)
+  loitering:
+    enabled: true
+    categories: [person]
+    seconds: 10                # person in view longer than this -> alert (short clip: 10 s)
+  night_activity:
+    enabled: true
+    start: "22:00"
+    end: "05:00"
+    categories: [person]
+  restricted_zone:             # object locations come from the VLM as text ("at the gate", "on the main road");
+    enabled: true              # an alert fires when the location contains one of these words
+    categories: [person, vehicle]
+    keywords: [backyard]        # e.g. add "gate" to alert on anyone at the gate
+  unusual_activity:            # VLM's per-second scene field `unusual` (crash, smoke, forced entry ...)
+    enabled: true
+    severity: critical
+    cooldown_s: 10             # one alert per incident, not one per second
+  repeat_vehicle:
+    enabled: true
+    min_gap_s: 30              # earlier sighting must have ended at least this long before
+    similarity: 0.90           # cosine similarity of VLM descriptions
+
+agent:
+  provider: groq               # free-tier API (GROQ_API_KEY); any error -> local Ollama `model` below
+  groq_model: openai/gpt-oss-120b   # free tier; also on this key: openai/gpt-oss-20b, qwen/qwen3.8-27b
+  model: llama3.1:latest       # local fallback LLM
+  max_tracks: 15               # matching objects sent to the LLM per question (prompt size stays bounded)
+  max_scenes: 3                # scene descriptions only for scene / time-window questions
+  timeout_s: 20                # Groq request timeout; then 1 retry, then the local fallback
+  temperature: 0
+
+storage:
+  db: data/drone_security.db
+  frames_dir: data/frames      # keyframes / alert snapshots / track thumbnails
+  output_video: data/output/annotated.mp4

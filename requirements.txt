@@ -1,0 +1,38 @@
+# Drone Security Analyst Agent - Python dependencies (tested with Python 3.12, versions as used in development)
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# GPU: install the PyTorch build matching your CUDA first (https://pytorch.org/get-started/locally/),
+# e.g. tested with torch 2.5.1 + CUDA 12.4:
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
+#
+# Not pip packages (install separately):
+#   Ollama  https://ollama.com  then:  ollama pull qwen3-vl:2b-instruct   (VLM)
+#                                     ollama pull nomic-embed-text:v1.5  (embeddings)
+#                                     ollama pull llama3.1               (optional local Q&A fallback)
+#   Groq API key (free tier) in a .env file next to run.py:  GROQ_API_KEY=...
+
+# detection + tracking (YOLO11 + ByteTrack)
+ultralytics==8.4.165
+lap==0.5.12
+opencv-python==4.10.0.84
+numpy==2.2.6
+
+# config
+PyYAML==6.0.3
+python-dotenv==1.1.0
+
+# local VLM + embeddings (Ollama client)
+ollama==0.6.3
+
+# Q&A LLM (Groq free tier)
+groq==0.37.1
+
+# chat app
+streamlit==1.57.0
+pandas==2.3.1
+pyarrow==26.0.1
+
+# tests
+pytest==9.2.0

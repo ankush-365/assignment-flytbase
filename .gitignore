@@ -1,0 +1,27 @@
+# secrets
+.env
+
+# environments / caches / editor
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+node_modules/
+
+# model weights (downloaded by ultralytics: see README / requirements.txt)
+models/
+*.pt
+
+# data: keep only the database
+data/*
+!data/drone_security.db
+*.db-wal
+*.db-shm
+
+# videos anywhere
+*.mp4
+*.mov
+*.avi
+*.mkv
