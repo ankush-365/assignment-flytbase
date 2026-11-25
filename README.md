@@ -58,3 +58,46 @@ and `gate_breach.mp4`
 
 Runs in the database: **2** = drone street (daytime), **4** = night loitering, **6** = gate breach.
 Settings (thresholds, models, rules) are in [`config.yaml`](config.yaml).
+
+## Design decisions
+
+```
+video + telemetry → YOLO11 + ByteTrack → VLM check (1 call/s, async) → rules → SQLite → app / CLI / chat
+```
+
+- **YOLO finds, the VLM verifies.** YOLO is fast but makes false detections on drone footage (rooftops as
+  "train"). A small local VLM checks every object and adds colour, type, state, location and a description.
+- **One VLM call per second, not per object.** Cost stays bounded by video length; the same call describes
+  the whole scene, which powers the "unusual activity" alert (e.g. a car crashing through a gate).
+- **qwen3-vl:2b on Ollama.** Free and local, fits in 3 GB VRAM, 3-5 s per call. 3B/7B models spilled to the
+  CPU (23-47 s per call).
+- **Async VLM.** It runs on a background thread so the video never waits; logs and alerts keep the time the
+  event happened, not the time the VLM answered.
+- **Locations as text, not drawn zones.** The drone moves, so fixed image regions point at different ground;
+  the VLM names the place from landmarks ("at the gate").
+- **Alerts only on verified objects seen ≥ 1 s**, once per object, so false detections and blips never alert.
+- **SQLite with timestamps on every row.** One file, no server; every frame queryable by time or object.
+- **Chat = filters in code + one LLM call.** Colour/object/place/time filters pick a small context (≤ 15
+  objects), so answers are fast, cheap and grounded; follow-ups search within the previous results.
+
+Details, diagrams and measured performance: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## AI tools
+
+**In the system**
+
+| Tool | Used for |
+|---|---|
+| YOLO11s + ByteTrack (Ultralytics) | detecting and tracking objects |
+| qwen3-vl:2b-instruct (Ollama, local) | verifying objects, attributes, locations, per-second scene description |
+| nomic-embed-text (Ollama, local) | embeddings for semantic search and repeat-vehicle matching |
+| openai/gpt-oss-120b (Groq, free tier) | chat answers and summaries (fallback: local llama3.1) |
+
+**In development**
+
+- **Claude Code** was the pair programmer: it proposed the architecture and wrote most of the code (pipeline,
+  VLM prompt + schema, rules, database, chat, Streamlit app, tests, docs).
+- **Impact:** a full prototype in days instead of weeks. Most of my time went into deciding scope, choosing
+  models, and checking results on real videos. Each problem found there was fixed and re-tested the same
+  day, e.g. the VLM cutting its JSON short, a 0.2 s blip raising a night alert, the crash detail being
+  dropped by the alert cooldown.
